@@ -1,91 +1,58 @@
-# BRICS Climate Intelligence — Integration Guide
+# BRICS Climate Intelligence — Live Deployment Guide
 
-This hackathon build is a **frontend prototype**. It intentionally uses illustrative readings and does not submit reports, call data providers, store evidence, or issue operational alerts. Before a real deployment, connect a secure backend and replace the demo objects in `client/src/pages/Home.tsx` with authenticated data flows.
+## What Is Active Now
 
-## 1. Core Data You Need to Connect
+The project now has a working full-stack foundation. The live signal field fetches current air-quality and weather context for New Delhi, Beijing, São Paulo, Johannesburg, and Moscow through a server-side adapter. It requests PM2.5, PM10, nitrogen dioxide, aerosol optical depth, the U.S. AQI, wind speed and direction, cloud cover, and precipitation, then caches the resulting city snapshot for five minutes. Open-Meteo documents the relevant air-quality and weather parameters and permits key-free evaluation use of its public endpoints.[1][2]
 
-| Capability | Recommended input | What your code needs | Typical secret/configuration |
-|---|---|---|---|
-| Ground air quality | Official city/national AQ monitoring APIs and approved low-cost sensor networks | A normalised endpoint that returns station ID, coordinates, timestamp, PM2.5/PM10/NO₂/O₃, quality flags | `AIR_QUALITY_API_KEY`, provider base URL, station allowlist |
-| Satellite pollution | Sentinel-5P / Copernicus services, NASA Earthdata products, or a licensed imagery provider | Scheduled ingestion that clips satellite rasters to corridors and extracts pollutant/thermal features | `COPERNICUS_CLIENT_ID`, `COPERNICUS_CLIENT_SECRET` or `NASA_EARTHDATA_TOKEN` |
-| Weather and dispersion | National meteorological services, ECMWF, Open-Meteo, or another licensed forecast provider | Wind, boundary-layer height, precipitation, temperature, and forecast time grid | `WEATHER_API_KEY`, provider base URL, model version |
-| Citizen evidence | A secure form API plus object storage | Signed image upload URLs, metadata validation, consent capture, moderation/verification queue | `STORAGE_BUCKET`, storage credentials, `REPORTS_API_URL` |
-| Geospatial map | The included map integration can be enabled in the frontend | Base map, country/city boundaries, sensor and alert layers | No separate key is needed for the included map proxy in this project template |
-| Alerts and partner coordination | Email/SMS/push/webhook service and partner directory | Alert template, recipient policy, escalation rules, delivery audit log | `ALERT_WEBHOOK_URL`, email/SMS provider credentials, partner contact IDs |
-| Authentication | A trusted identity provider for agency users and moderators | Role checks for public reporter, verifier, city desk, national desk, and administrator | OAuth client ID/secret, redirect URLs, JWT signing secret |
-
-## 2. Environment Variables
-
-Create a local `.env` file for development and add matching secrets in your deployment settings. **Never put private keys in a `VITE_` variable**, because values with that prefix are sent to the browser.
-
-```bash
-# Server-only secrets — keep private
-AIR_QUALITY_API_KEY=replace_with_provider_key
-AIR_QUALITY_API_BASE_URL=https://provider.example/api
-WEATHER_API_KEY=replace_with_provider_key
-WEATHER_API_BASE_URL=https://provider.example/api
-COPERNICUS_CLIENT_ID=replace_with_client_id
-COPERNICUS_CLIENT_SECRET=replace_with_client_secret
-NASA_EARTHDATA_TOKEN=optional_provider_token
-STORAGE_BUCKET=your-secure-evidence-bucket
-STORAGE_REGION=your-region
-ALERT_WEBHOOK_URL=https://your-alert-service.example/webhook
-JWT_SECRET=generate_a_long_random_secret
-OAUTH_CLIENT_ID=replace_with_client_id
-OAUTH_CLIENT_SECRET=replace_with_client_secret
-
-# Browser-safe values only
-VITE_APP_ENV=development
-VITE_PUBLIC_MAP_STYLE_ID=optional_public_style_id
-```
-
-## 3. Backend Work Required Before Going Live
-
-The current project is intentionally frontend-only. To operate it safely, add server-side routes or services for the following responsibilities:
-
-| Route/service | Responsibility | Security requirements |
+| Capability | Current implementation | Configuration required now |
 |---|---|---|
-| `GET /api/signals` | Return normalised and time-bounded hotspot cards for the map. | Rate limiting, cached upstream calls, response schema validation. |
-| `GET /api/forecast` | Return corridor forecast layers and confidence for selected forecast windows. | Provider credential isolation, provenance and model-version metadata. |
-| `POST /api/reports/upload-url` | Create a short-lived signed URL for image/sensor evidence upload. | Auth or anti-abuse control, file type/size allowlist, malware scanning. |
-| `POST /api/reports` | Save structured field reports and place them in a verification queue. | Consent record, encryption at rest, coarse location options, audit trail. |
-| `POST /api/alerts/brief` | Create a human-reviewed alert brief and deliver it to permitted desks. | Role-based access, approval step, idempotency key, delivery logs. |
+| Live air quality and weather | Server-side Open-Meteo adapter with live/degraded/unavailable states | **None** for the hackathon prototype |
+| Sign-in | Built-in OAuth session flow | **None**; the project identity environment is already provided |
+| Roles | `reporter`, `verifier`, `city_desk`, `national_desk`, and `admin` in the database | Assign roles after the intended people first sign in |
+| Evidence handling | Protected report creation, file validation, built-in object storage, and database metadata | **None**; storage credentials are platform-managed |
+| Review workflow | Corroboration required before an alert can be prepared | Verifier or operational-desk role |
+| Alert dispatch | Human approval, immutable dispatch timestamps, and a project-owner notification | **None** for owner notification; see optional partner delivery below |
 
-## 4. Data Model to Keep Consistent
+## Roles and Their Responsibilities
 
-Use one shared shape across all providers so the map, forecast, and alert logic can interoperate.
+The account that owns the project is automatically treated as an administrator. Any person who signs in for the first time is created as a `reporter`; this lets them submit protected evidence but not validate evidence or send operational briefings. Promote selected users through the project database interface or by calling the protected `access.assignRole` procedure as an administrator.
 
-```ts
-type PollutionSignal = {
-  id: string;
-  countryCode: "BR" | "RU" | "IN" | "CN" | "ZA";
-  location: { lat: number; lng: number; precisionMeters?: number };
-  observedAt: string; // ISO 8601
-  pollutant: "pm25" | "pm10" | "no2" | "o3" | "smoke";
-  value?: number;
-  unit?: string;
-  sourceKinds: Array<"official_station" | "low_cost_sensor" | "satellite" | "weather_model" | "citizen_report">;
-  confidence: number; // 0–1
-  verificationStatus: "unreviewed" | "corroborated" | "verified" | "rejected";
-  forecast: { horizonHours: number; affectedCorridorIds: string[]; modelVersion: string }[];
-};
-```
+| Role | Can do |
+|---|---|
+| `reporter` | Submit consented evidence and view their own reports. |
+| `verifier` | View the review queue and corroborate or reject evidence. |
+| `city_desk` | Review evidence and prepare alert briefings for a city corridor. |
+| `national_desk` | Review evidence, prepare briefings, and approve/dispatch alerts. |
+| `admin` | All operational actions plus role assignment. |
 
-## 5. Privacy, Governance, and Safety Checklist
+> The review desk is deliberately hidden unless the authenticated account has a permitted operational role. The server enforces the same role gates, so hiding the UI is not the security boundary.
 
-Citizen reports can include identifiable images, precise locations, and sensitive environmental claims. Show clear consent, allow a reporter to reduce location precision, delete raw evidence on a documented retention schedule, and require human review before public attribution or authority escalation. For cross-border model sharing, exchange the minimum necessary derived features and maintain a record of model version, source provenance, and confidence rather than automatically sharing raw media.
+## Evidence Workflow
 
-## 6. Where to Change the Demo Data
+An authenticated reporter submits location, country, incident type, observation time, narrative description, consent, and an optional evidence attachment. The backend accepts JPEG, PNG, WebP, CSV, plain-text, and JSON files up to **5 MB**, saves only attachment metadata in the database, and stores the file in the managed object store. A reviewer must corroborate the report before a city or national desk can prepare an alert. An alert remains `awaiting_approval` until a national desk or administrator dispatches it.
 
-The interactive map’s demonstration signals are located in:
+## Optional Partner-Authority Delivery
 
-```text
-client/src/pages/Home.tsx → const signals = [...]
-```
+The current dispatch action sends a protected owner notification and records the approval and dispatch timestamps. This allows the full human-reviewed alert path to be demonstrated without claiming it contacts a government authority. To deliver to an actual authority system, add one of the following only after the recipient organisation provides an approved endpoint and routing policy.
 
-Replace this constant with a typed data-fetching layer once a backend is available. The report drawer currently shows a successful demo toast; change its submit handler to upload evidence and call `POST /api/reports` only after the server-side protections above are implemented.
+| Option | Add to deployment secrets | Implement next |
+|---|---|---|
+| Government/agency webhook | `ALERT_WEBHOOK_URL` and, if required, `ALERT_WEBHOOK_TOKEN` | Sign outbound requests, restrict recipients by country/role, set retry and idempotency policies, and retain delivery receipts. |
+| Email/SMS provider | Provider API key and approved sender configuration | Enforce recipient allowlists, approval workflow, escalation templates, and delivery auditing. |
+| National message broker | Broker credentials, topic allowlist, and partner certificate details | Perform a formal security review and introduce durable queues before sending operational messages. |
 
-## 7. Practical Hackathon Scope
+Never expose any of these values through browser-facing variables such as `VITE_*`. Add all external credentials through the project secrets settings rather than committing them to a `.env` file.
 
-For a strong demo, connect one air-quality source, one weather source, and a simple secure report endpoint first. Then show how the same `PollutionSignal` structure can accept satellite and partner-model data. This demonstrates interoperability without pretending that every national dataset or alert channel is already live.
+## Database Tables
 
+The migration `drizzle/0000_broad_the_initiative.sql` has been applied. The `users` table now contains the role field; `evidence_reports` contains report metadata, consent, attachment references, and review status; `climate_alerts` contains the reviewable briefing, recipients, approval identity, and delivery state.
+
+## Validation Completed
+
+The project has passed `pnpm check`, `pnpm test`, and `pnpm build`. The live tRPC endpoint returned a current five-city response during validation. The client presents a clear standby or degraded state if the public source is unavailable rather than presenting stale seed data as live information.
+
+## References
+
+[1] [Open-Meteo Air Quality API documentation](https://open-meteo.com/en/docs/air-quality-api)
+
+[2] [Open-Meteo Weather Forecast API documentation](https://open-meteo.com/en/docs)

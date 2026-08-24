@@ -1,0 +1,11 @@
+# Full-Stack Upgrade Checklist
+
+- [x] Upgrade the project with database, authentication, and secure file storage support.
+- [x] Define the pollution-signal, evidence-report, verification, and alert data model.
+- [x] Add a live public weather and air-quality adapter with safe fallback states.
+- [x] Add role-aware access for reporter, verifier, city desk, national desk, and administrator workflows.
+- [x] Implement secure evidence upload, verification actions, and human-reviewed alert briefing.
+- [x] Update the dashboard UI to surface live status, connected-source health, and role-specific actions.
+- [x] Validate the build, role gates, and secure submission paths; document required secrets and activation steps.
+- [x] Add an in-product reviewer desk for corroborating submitted evidence, drafting an alert, and dispatching approved briefings by role.
+- [x] Add automated tests for reporter, reviewer, and dispatcher role-gate decisions.

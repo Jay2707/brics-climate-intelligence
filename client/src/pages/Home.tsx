@@ -3,8 +3,12 @@
  * Design reminder: atmospheric cartographic editorial style; use Monsoon Ink, paper-like panels,
  * contour lines, and precise civic language. Does this reinforce or dilute the field-atlas philosophy?
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
+import { startLogin } from "@/const";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { ReviewDesk } from "@/components/ReviewDesk";
 import {
   Activity,
   ArrowRight,
@@ -167,18 +171,51 @@ function RiverMark() {
   );
 }
 
+async function encodeAttachment(file: File) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("The selected evidence file could not be read."));
+    reader.readAsDataURL(file);
+  });
+  const [, dataBase64 = ""] = dataUrl.split(",", 2);
+  return { fileName: file.name, mimeType: file.type, dataBase64 };
+}
+
 export default function Home() {
   const [activeCountry, setActiveCountry] = useState<Country>("All");
   const [activeWindow, setActiveWindow] = useState("Now");
   const [activeSignalId, setActiveSignalId] = useState(1);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const liveClimateQuery = trpc.climate.liveSignals.useQuery(undefined, { refetchInterval: 300_000, retry: 1, refetchOnWindowFocus: false });
+  const evidenceMutation = trpc.evidence.submit.useMutation();
+  const isReviewer = Boolean(user && ["verifier", "city_desk", "national_desk", "admin"].includes(user.role));
+  const reviewQueue = trpc.evidence.reviewQueue.useQuery(undefined, { enabled: isReviewer, refetchOnWindowFocus: false });
+
+  const dashboardSignals = useMemo(() => signals.map(signal => {
+    const live = liveClimateQuery.data?.signals.find(candidate => candidate.city === signal.city);
+    if (!live) return signal;
+    const eta = live.forecastAqiInSixHours === null ? "Live now" : live.trend === "rising" ? "Rising +6h" : live.trend === "improving" ? "Improving +6h" : "Stable +6h";
+    return {
+      ...signal,
+      aqi: Math.round(live.aqi),
+      risk: live.risk as Signal["risk"],
+      eta,
+      confidence: liveClimateQuery.data?.status === "live" ? 86 : 68,
+      source: `Live public forecast · PM2.5 ${live.pm25.toFixed(1)} µg/m³ · wind ${live.windSpeed.toFixed(1)} km/h`,
+      summary: `${live.pm25.toFixed(1)} µg/m³ PM2.5 with ${live.windSpeed.toFixed(1)} km/h winds at ${live.windDirection.toFixed(0)}°. Six-hour air-quality trend: ${live.trend}.`,
+    };
+  }), [liveClimateQuery.data]);
 
   const visibleSignals = useMemo(
-    () => signals.filter(signal => activeCountry === "All" || signal.country === activeCountry),
-    [activeCountry],
+    () => dashboardSignals.filter(signal => activeCountry === "All" || signal.country === activeCountry),
+    [activeCountry, dashboardSignals],
   );
-  const activeSignal = signals.find(signal => signal.id === activeSignalId) ?? signals[0];
+  const activeSignal = dashboardSignals.find(signal => signal.id === activeSignalId) ?? dashboardSignals[0];
+  const feedStatus = liveClimateQuery.data?.status ?? (liveClimateQuery.isLoading ? "loading" : "unavailable");
+  const liveSignalCount = liveClimateQuery.data?.signals.length ?? 0;
 
   const selectSignal = (signal: Signal) => {
     setActiveSignalId(signal.id);
@@ -188,6 +225,34 @@ export default function Home() {
   };
 
   const scrollToField = () => document.getElementById("signal-field")?.scrollIntoView({ behavior: "smooth" });
+
+  const submitEvidence = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isAuthenticated) {
+      toast("Sign in required", { description: "A verified account is required to protect the evidence and its review trail." });
+      startLogin();
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const selectedFile = form.get("attachment");
+    try {
+      const attachment = selectedFile instanceof File && selectedFile.size > 0 ? await encodeAttachment(selectedFile) : undefined;
+      await evidenceMutation.mutateAsync({
+        city: String(form.get("city") ?? ""),
+        countryCode: String(form.get("countryCode") ?? "IN") as "BR" | "RU" | "IN" | "CN" | "ZA",
+        incidentType: String(form.get("incidentType") ?? "smoke_haze") as "smoke_haze" | "industrial_emissions" | "agricultural_burning" | "sensor_reading",
+        description: String(form.get("description") ?? ""),
+        observedAt: form.get("observedAt") ? new Date(String(form.get("observedAt"))).getTime() : Date.now(),
+        consentProvided: true,
+        attachment,
+      });
+      event.currentTarget.reset();
+      setIsReportOpen(false);
+      toast("Evidence received for verification", { description: "Your report is stored securely and begins in the submitted state." });
+    } catch (error) {
+      toast("Evidence could not be submitted", { description: error instanceof Error ? error.message : "Please verify the report details and try again." });
+    }
+  };
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#061C29] text-[#EFF7F1]">
@@ -215,11 +280,11 @@ export default function Home() {
           <div className="mt-auto rounded-[22px] border border-[#CDE1DA]/10 bg-[#0A2937] p-4 shadow-[0_12px_34px_rgba(0,0,0,.15)]">
             <div className="flex items-center gap-2 text-[#A8E0CF]">
               <Radio className="h-3.5 w-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.17em]">Demo field online</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.17em]">{feedStatus === "live" ? "Live field online" : feedStatus === "degraded" ? "Partial live field" : "Field standby"}</span>
             </div>
-            <p className="mt-3 text-sm leading-5 text-[#BCD0CB]">Illustrative feeds only. Connect live services before operational use.</p>
-            <button onClick={() => toast("Data-source guide", { description: "See INTEGRATION_GUIDE.md in the supplied codebase." })} className="mt-4 flex items-center gap-1 text-xs font-semibold text-[#F2D47A] transition hover:gap-2">
-              Connection notes <ArrowRight className="h-3.5 w-3.5" />
+            <p className="mt-3 text-sm leading-5 text-[#BCD0CB]">{liveClimateQuery.data?.message ?? "Connecting to the public atmospheric source."}</p>
+            <button onClick={() => toast("Live source notes", { description: "The prototype uses the public Open-Meteo air-quality and weather endpoints with a five-minute server cache." })} className="mt-4 flex items-center gap-1 text-xs font-semibold text-[#F2D47A] transition hover:gap-2">
+              Source notes <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </aside>
@@ -240,8 +305,10 @@ export default function Home() {
             <div className="ml-auto flex items-center gap-2.5">
               <div className="hidden items-center gap-2 rounded-full border border-[#CDE1DA]/12 bg-[#0A2634] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#AAD9CC] sm:flex">
                 <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#78C7B2] opacity-45" /><span className="relative inline-flex h-2 w-2 rounded-full bg-[#78C7B2]" /></span>
-                Prototype view
+                {feedStatus === "live" ? "Live public data" : "Operational preview"}
               </div>
+              {!authLoading && !isAuthenticated && <button onClick={startLogin} className="quiet-button hidden !px-3 !py-2 !text-xs md:inline-flex">Sign in</button>}
+              {isAuthenticated && <span className="hidden rounded-full border border-[#CDE1DA]/12 px-3 py-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#F2D47A] md:inline-flex">{user?.role.replaceAll("_", " ")}</span>}
               <button onClick={() => setIsReportOpen(true)} className="action-button text-xs sm:text-sm">
                 <Camera className="h-4 w-4" />
                 <span className="hidden sm:inline">Report a signal</span>
@@ -271,7 +338,7 @@ export default function Home() {
                 </button>
               </div>
               <div className="mt-10 grid max-w-xl grid-cols-3 gap-5 border-t border-[#E9F0E9]/15 pt-5">
-                {[['5', 'countries in view'], ['9', 'illustrative alerts'], ['14m', 'simulated refresh']].map(([value, label]) => (
+                {[[String(liveSignalCount || 5), 'cities in view'], [feedStatus === "live" ? 'Live' : 'Safe', 'feed state'], ['5m', 'server refresh']].map(([value, label]) => (
                   <div key={label}>
                     <p className="font-serif text-2xl tracking-[-.04em] text-[#F7F8F3]">{value}</p>
                     <p className="mt-1 text-[10px] uppercase tracking-[0.13em] text-[#AABFBA]">{label}</p>
@@ -301,7 +368,7 @@ export default function Home() {
                 <div className="absolute left-5 top-5 z-20 flex flex-wrap gap-2">
                   <span className="map-chip"><span className="h-1.5 w-1.5 rounded-full bg-[#F2B84B]" /> PM2.5 plume</span>
                   <span className="map-chip"><span className="h-1.5 w-1.5 rounded-full bg-[#78C7B2]" /> Verified local report</span>
-                  <span className="map-chip"><CloudSun className="h-3.5 w-3.5" /> {activeWindow} forecast</span>
+                  <span className="map-chip"><CloudSun className="h-3.5 w-3.5" /> {activeWindow} forecast · {feedStatus}</span>
                 </div>
                 <article className="evidence-slip absolute left-5 top-[84px] z-20 max-w-[235px]" aria-label="Corroborated citizen evidence note">
                   <div className="flex items-center gap-2"><RiverMark /><span className="text-[9px] font-extrabold uppercase tracking-[.17em]">Field note B-014</span><span className="ml-auto rounded-full bg-[#2F776B]/12 px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.1em] text-[#216257]">Corroborated</span></div>
@@ -351,8 +418,8 @@ export default function Home() {
                   <div className="mt-5 grid grid-cols-3 divide-x divide-[#DDEAE1]/10 border-y border-[#DDEAE1]/10 py-4">
                     {[['AQI', String(activeSignal.aqi)], ['Confidence', `${activeSignal.confidence}%`], ['Arrival', activeSignal.eta]].map(([label, value]) => <div key={label} className="px-2 first:pl-0 last:pr-0"><p className="text-[9px] uppercase tracking-[.14em] text-[#83A19D]">{label}</p><p className="mt-1 text-sm font-semibold text-[#F1F6F1]">{value}</p></div>)}
                   </div>
-                  <div className="mt-5 flex items-center gap-2 text-xs text-[#A9C0BA]"><Radio className="h-3.5 w-3.5 text-[#A8E0CF]" />{activeSignal.source}</div>
-                  <button onClick={() => toast("Partner briefing queued", { description: "In production, this action can notify configured national and city desks." })} className="panel-action mt-5">Brief corridor partners <ArrowRight className="h-4 w-4" /></button>
+                  <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-[#A9C0BA]"><Radio className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#A8E0CF]" />{activeSignal.source}</div>
+                  <button onClick={() => isReviewer ? document.getElementById("review-desk")?.scrollIntoView({ behavior: "smooth" }) : toast("Human review required", { description: "A verifier or authorised desk must corroborate evidence before an alert briefing can be prepared." })} className="panel-action mt-5">{isReviewer ? "Open review workflow" : "Review before briefing"} <ArrowRight className="h-4 w-4" /></button>
                 </div>
 
                 <div className="rounded-[26px] border border-[#DCEAE2]/12 bg-[#0A2937] p-5">
@@ -396,12 +463,13 @@ export default function Home() {
             </div>
           </section>
 
+          {isReviewer && <ReviewDesk role={user?.role ?? "reporter"} />}
           <footer className="flex flex-col gap-4 border-t border-[#DCEAE2]/10 px-5 py-7 text-xs text-[#91AAA5] md:flex-row md:items-center md:justify-between md:px-8 lg:px-10"><p>BRICS Climate Intelligence · Hackathon prototype · <span className="text-[#C8DAD4]">Illustrative data only</span></p><div className="flex gap-5"><button onClick={() => toast("Prototype note", { description: "Production deployments require authenticated data providers, policies, and human review." })} className="transition hover:text-[#E8F3EE]">Data responsibility</button><button onClick={() => setIsReportOpen(true)} className="transition hover:text-[#E8F3EE]">Share evidence</button></div></footer>
         </main>
 
         {isMobileMenuOpen && <div className="fixed inset-0 z-50 bg-[#04151F]/85 p-5 backdrop-blur-sm lg:hidden"><div className="h-full rounded-[28px] border border-[#DCEAE2]/12 bg-[#0A2937] p-6"><div className="flex items-center justify-between"><Logo /><button className="icon-button" onClick={() => setIsMobileMenuOpen(false)} aria-label="Close menu"><X className="h-5 w-5" /></button></div><div className="mt-10 space-y-3">{['Signal field', 'Active alerts', 'Partner desk', 'Evidence log'].map((label, index) => <button key={label} onClick={() => {setIsMobileMenuOpen(false); if (index === 0) scrollToField(); else toast("Briefing module", { description: "This hackathon prototype focuses on the live signal field." });}} className={`sidebar-link w-full ${index === 0 ? "sidebar-link-active" : ""}`}><span>{label}</span><ArrowRight className="ml-auto h-4 w-4" /></button>)}</div></div></div>}
 
-        {isReportOpen && <div className="fixed inset-0 z-[60] flex items-end justify-end bg-[#04151F]/70 p-0 backdrop-blur-sm sm:p-5"><section role="dialog" aria-modal="true" aria-label="Submit a local signal" className="report-drawer w-full overflow-y-auto rounded-t-[28px] border border-[#DCEAE2]/14 bg-[#F1F5EE] p-6 text-[#0B2535] shadow-2xl sm:max-h-[90vh] sm:max-w-xl sm:rounded-[28px] md:p-8"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#53726D]">Citizen evidence</p><h2 className="mt-2 font-serif text-4xl leading-none tracking-[-.06em]">Add a local signal.</h2></div><button onClick={() => setIsReportOpen(false)} className="light-icon-button" aria-label="Close report form"><X className="h-5 w-5" /></button></div><p className="mt-4 max-w-md text-sm leading-6 text-[#536D69]">This demo records no information. In production, request consent, minimise location precision where needed, and put every report through verification.</p><form onSubmit={event => {event.preventDefault(); setIsReportOpen(false); toast("Demo report received", { description: "Connect a secure API and storage service to submit real evidence." });}} className="mt-7 space-y-4"><label className="field-label">Signal type<select defaultValue="Smoke or haze" className="field-input"><option>Smoke or haze</option><option>Industrial emissions</option><option>Agricultural burning</option><option>Low-cost sensor reading</option></select></label><div className="grid gap-4 sm:grid-cols-2"><label className="field-label">City / locality<input required placeholder="e.g. New Delhi" className="field-input" /></label><label className="field-label">Observed time<input type="datetime-local" className="field-input" /></label></div><label className="field-label">What are you seeing?<textarea required rows={4} placeholder="Describe the colour, direction, odour, duration, or visible source." className="field-input resize-none" /></label><label className="upload-box"><Camera className="h-5 w-5 text-[#2F776B]" /><span><strong>Add a photo or sensor file</strong><small>Demo UI — connect secure upload storage for live use.</small></span><input type="file" className="sr-only" /></label><button type="submit" className="submit-button">Send for verification <ArrowRight className="h-4 w-4" /></button></form></section></div>}
+        {isReportOpen && <div className="fixed inset-0 z-[60] flex items-end justify-end bg-[#04151F]/70 p-0 backdrop-blur-sm sm:p-5"><section role="dialog" aria-modal="true" aria-label="Submit a local signal" className="report-drawer w-full overflow-y-auto rounded-t-[28px] border border-[#DCEAE2]/14 bg-[#F1F5EE] p-6 text-[#0B2535] shadow-2xl sm:max-h-[90vh] sm:max-w-xl sm:rounded-[28px] md:p-8"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#53726D]">Secure citizen evidence</p><h2 className="mt-2 font-serif text-4xl leading-none tracking-[-.06em]">Add a local signal.</h2></div><button onClick={() => setIsReportOpen(false)} className="light-icon-button" aria-label="Close report form"><X className="h-5 w-5" /></button></div><p className="mt-4 max-w-md text-sm leading-6 text-[#536D69]">Reports are stored as submitted evidence, not public claims. A permitted verifier must corroborate a report before it can become an alert briefing.</p>{!isAuthenticated && <button onClick={startLogin} className="mt-4 rounded-lg bg-[#1B5E55] px-3 py-2 text-sm font-bold text-white">Sign in to submit securely</button>}<form onSubmit={submitEvidence} className="mt-7 space-y-4"><label className="field-label">Signal type<select name="incidentType" defaultValue="smoke_haze" className="field-input"><option value="smoke_haze">Smoke or haze</option><option value="industrial_emissions">Industrial emissions</option><option value="agricultural_burning">Agricultural burning</option><option value="sensor_reading">Low-cost sensor reading</option></select></label><div className="grid gap-4 sm:grid-cols-2"><label className="field-label">City / locality<input name="city" required minLength={2} placeholder="e.g. New Delhi" className="field-input" /></label><label className="field-label">Country<select name="countryCode" defaultValue="IN" className="field-input"><option value="BR">Brazil</option><option value="RU">Russia</option><option value="IN">India</option><option value="CN">China</option><option value="ZA">South Africa</option></select></label></div><label className="field-label">Observed time<input name="observedAt" type="datetime-local" className="field-input" /></label><label className="field-label">What are you seeing?<textarea name="description" required minLength={10} maxLength={3000} rows={4} placeholder="Describe the colour, direction, odour, duration, or visible source." className="field-input resize-none" /></label><label className="upload-box"><Camera className="h-5 w-5 text-[#2F776B]" /><span><strong>Add a photo or sensor file</strong><small>JPEG, PNG, WebP, CSV, text, or JSON; maximum 5 MB.</small></span><input name="attachment" type="file" accept="image/jpeg,image/png,image/webp,text/csv,text/plain,application/json" className="sr-only" /></label><label className="flex items-start gap-2 text-xs leading-5 text-[#4B6963]"><input name="consent" required type="checkbox" className="mt-1" />I confirm I may share this evidence for verification and understand that it will not be treated as a public claim until reviewed.</label><button disabled={evidenceMutation.isPending} type="submit" className="submit-button disabled:cursor-not-allowed disabled:opacity-60">{evidenceMutation.isPending ? "Sending securely…" : isAuthenticated ? "Send for verification" : "Sign in to send"} <ArrowRight className="h-4 w-4" /></button></form></section></div>}
       </div>
     </div>
   );
