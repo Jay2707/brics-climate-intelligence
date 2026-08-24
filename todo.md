@@ -14,3 +14,7 @@
 - [x] Improve map and interaction controls for touch-first mobile use and keyboard accessibility.
 - [x] Document the no-key public data path and the API keys required for partner-grade air-quality, satellite, and authority-alert integrations.
 - [x] Validate interactive desktop and mobile workflows after the upgrade.
+- [x] Define the production source architecture for weather, satellite, ground-air-quality, and federated-model data.
+- [x] Research official provider credentials, licensing, data formats, refresh expectations, and BRICS coverage.
+- [x] Add production integration configuration placeholders and a map-layer implementation plan without exposing credentials to the browser.
+- [x] Publish the exact environment-variable, dataset, governance, and rollout checklist for an operational deployment.
