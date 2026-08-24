@@ -9,3 +9,8 @@
 - [x] Validate the build, role gates, and secure submission paths; document required secrets and activation steps.
 - [x] Add an in-product reviewer desk for corroborating submitted evidence, drafting an alert, and dispatching approved briefings by role.
 - [x] Add automated tests for reporter, reviewer, and dispatcher role-gate decisions.
+- [x] Add a live detail drawer that presents a consistent city snapshot whenever a map pin, focus card, or country filter is selected.
+- [x] Add explicit refresh, loading, stale-data, and live-response feedback to the operational signal field.
+- [x] Improve map and interaction controls for touch-first mobile use and keyboard accessibility.
+- [x] Document the no-key public data path and the API keys required for partner-grade air-quality, satellite, and authority-alert integrations.
+- [x] Validate interactive desktop and mobile workflows after the upgrade.

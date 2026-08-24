@@ -2,7 +2,7 @@
 
 ## What Is Active Now
 
-The project now has a working full-stack foundation. The live signal field fetches current air-quality and weather context for New Delhi, Beijing, São Paulo, Johannesburg, and Moscow through a server-side adapter. It requests PM2.5, PM10, nitrogen dioxide, aerosol optical depth, the U.S. AQI, wind speed and direction, cloud cover, and precipitation, then caches the resulting city snapshot for five minutes. Open-Meteo documents the relevant air-quality and weather parameters and permits key-free evaluation use of its public endpoints.[1][2]
+The project now has a working full-stack foundation. The live signal field fetches current air-quality and weather context for New Delhi, Beijing, São Paulo, Johannesburg, and Moscow through a server-side adapter. It requests PM2.5, PM10, nitrogen dioxide, aerosol optical depth, the U.S. AQI, wind speed and direction, cloud cover, and precipitation; it exposes Now, +6h, +12h, and +24h AQI horizons and keeps a 60-second server cache with a manual refresh control. Open-Meteo documents the relevant air-quality and weather parameters and permits key-free evaluation use of its public endpoints.[1][2]
 
 | Capability | Current implementation | Configuration required now |
 |---|---|---|
@@ -42,6 +42,20 @@ The current dispatch action sends a protected owner notification and records the
 | National message broker | Broker credentials, topic allowlist, and partner certificate details | Perform a formal security review and introduce durable queues before sending operational messages. |
 
 Never expose any of these values through browser-facing variables such as `VITE_*`. Add all external credentials through the project secrets settings rather than committing them to a `.env` file.
+
+## Do You Need an API Key?
+
+You do **not** need to add an API key for the live data currently shown in the prototype. It uses Open-Meteo’s public weather and air-quality endpoints from the server, which support evaluation and non-commercial use without a key.[1][2] The dashboard therefore already provides real public-source values and forecast responses. A key becomes necessary when you replace the hackathon source with a commercial, national, or partner-controlled service.
+
+| Desired production capability | Is an API key or credential needed? | Example configuration |
+|---|---|---|
+| Current prototype live air quality and weather | No | No configuration needed. |
+| Higher-volume/commercial Open-Meteo plan | Yes | `OPEN_METEO_API_KEY` on the server only. |
+| Official national monitoring network | Usually yes | Provider-specific `AIR_QUALITY_API_KEY`. |
+| Satellite imagery/detection product | Yes | `COPERNICUS_CLIENT_ID` and `COPERNICUS_CLIENT_SECRET`, or a licensed-provider token. |
+| Government/agency alert delivery | Yes | `ALERT_WEBHOOK_URL` and, if applicable, `ALERT_WEBHOOK_TOKEN`. |
+
+No private credential should be placed in the frontend source code or a `VITE_*` environment variable.
 
 ## Database Tables
 

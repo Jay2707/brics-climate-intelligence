@@ -3,6 +3,7 @@
  * Replace this source with approved national and satellite partners before operational use.
  */
 export type LiveRisk = "Watch" | "Elevated" | "High";
+export type ForecastHorizon = "now" | "6h" | "12h" | "24h";
 
 export type LiveClimateSignal = {
   city: string;
@@ -19,7 +20,7 @@ export type LiveClimateSignal = {
   windDirection: number;
   cloudCover: number;
   precipitation: number;
-  forecastAqiInSixHours: number | null;
+  forecastAqi: Record<ForecastHorizon, number | null>;
   trend: "rising" | "stable" | "improving";
   risk: LiveRisk;
   observedAt: string;
@@ -45,7 +46,7 @@ export const BRICS_CITIES: CityDefinition[] = [
   { city: "Moscow", country: "Russia", countryCode: "RU", latitude: 55.7558, longitude: 37.6173 },
 ];
 
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 60 * 1000;
 let cachedSnapshot: { expiresAt: number; value: LiveClimateResponse } | null = null;
 
 const toNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -56,16 +57,27 @@ export function classifyAirQuality(aqi: number): LiveRisk {
   return "Watch";
 }
 
-function getSixHourForecast(air: AirResponse, observedAt: string, currentAqi: number): { forecast: number | null; trend: LiveClimateSignal["trend"] } {
-  const targetTime = new Date(new Date(observedAt).getTime() + 6 * 60 * 60 * 1000).getTime();
+function getForecastAtHorizon(air: AirResponse, observedAt: string, hours: number): number | null {
+  if (hours === 0) return null;
+  const targetTime = new Date(new Date(observedAt).getTime() + hours * 60 * 60 * 1000).getTime();
   const times = air.hourly?.time ?? [];
   const values = air.hourly?.us_aqi ?? [];
   const index = times.findIndex(time => new Date(time).getTime() >= targetTime);
-  const forecast = index >= 0 ? values[index] ?? null : null;
-  if (forecast === null) return { forecast: null, trend: "stable" };
-  if (forecast >= currentAqi + 8) return { forecast, trend: "rising" };
-  if (forecast <= currentAqi - 8) return { forecast, trend: "improving" };
-  return { forecast, trend: "stable" };
+  return index >= 0 ? values[index] ?? null : null;
+}
+
+function getForecastProfile(air: AirResponse, observedAt: string, currentAqi: number): { forecastAqi: LiveClimateSignal["forecastAqi"]; trend: LiveClimateSignal["trend"] } {
+  const forecastAqi = {
+    now: currentAqi,
+    "6h": getForecastAtHorizon(air, observedAt, 6),
+    "12h": getForecastAtHorizon(air, observedAt, 12),
+    "24h": getForecastAtHorizon(air, observedAt, 24),
+  };
+  const forecast = forecastAqi["6h"];
+  if (forecast === null) return { forecastAqi, trend: "stable" };
+  if (forecast >= currentAqi + 8) return { forecastAqi, trend: "rising" };
+  if (forecast <= currentAqi - 8) return { forecastAqi, trend: "improving" };
+  return { forecastAqi, trend: "stable" };
 }
 
 async function fetchCitySnapshot(city: CityDefinition): Promise<LiveClimateSignal> {
@@ -93,7 +105,7 @@ async function fetchCitySnapshot(city: CityDefinition): Promise<LiveClimateSigna
   const weatherCurrent = weather.current ?? {};
   const observedAt = typeof airCurrent.time === "string" ? airCurrent.time : new Date().toISOString();
   const aqi = toNumber(airCurrent.us_aqi);
-  const { forecast, trend } = getSixHourForecast(air, observedAt, aqi);
+  const { forecastAqi, trend } = getForecastProfile(air, observedAt, aqi);
 
   return {
     ...city,
@@ -106,15 +118,15 @@ async function fetchCitySnapshot(city: CityDefinition): Promise<LiveClimateSigna
     windDirection: toNumber(weatherCurrent.wind_direction_10m),
     cloudCover: toNumber(weatherCurrent.cloud_cover),
     precipitation: toNumber(weatherCurrent.precipitation),
-    forecastAqiInSixHours: forecast,
+    forecastAqi,
     trend,
     risk: classifyAirQuality(aqi),
     observedAt,
   };
 }
 
-export async function getLiveClimateSnapshot(): Promise<LiveClimateResponse> {
-  if (cachedSnapshot && cachedSnapshot.expiresAt > Date.now()) return cachedSnapshot.value;
+export async function getLiveClimateSnapshot(forceRefresh = false): Promise<LiveClimateResponse> {
+  if (!forceRefresh && cachedSnapshot && cachedSnapshot.expiresAt > Date.now()) return cachedSnapshot.value;
 
   const settled = await Promise.allSettled(BRICS_CITIES.map(fetchCitySnapshot));
   const signals = settled.flatMap(result => result.status === "fulfilled" ? [result.value] : []);

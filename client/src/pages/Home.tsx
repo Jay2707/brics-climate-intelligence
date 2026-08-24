@@ -25,6 +25,7 @@ import {
   Mic,
   MoveUpRight,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   TimerReset,
@@ -186,45 +187,69 @@ export default function Home() {
   const [activeCountry, setActiveCountry] = useState<Country>("All");
   const [activeWindow, setActiveWindow] = useState("Now");
   const [activeSignalId, setActiveSignalId] = useState(1);
+  const [isSignalDossierOpen, setIsSignalDossierOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const liveClimateQuery = trpc.climate.liveSignals.useQuery(undefined, { refetchInterval: 300_000, retry: 1, refetchOnWindowFocus: false });
+  const climateRefreshMutation = trpc.climate.refresh.useMutation();
   const evidenceMutation = trpc.evidence.submit.useMutation();
   const isReviewer = Boolean(user && ["verifier", "city_desk", "national_desk", "admin"].includes(user.role));
   const reviewQueue = trpc.evidence.reviewQueue.useQuery(undefined, { enabled: isReviewer, refetchOnWindowFocus: false });
 
+  const activeHorizon: "now" | "6h" | "12h" | "24h" = activeWindow === "Now" ? "now" : activeWindow === "+6h" ? "6h" : activeWindow === "+12h" ? "12h" : "24h";
   const dashboardSignals = useMemo(() => signals.map(signal => {
     const live = liveClimateQuery.data?.signals.find(candidate => candidate.city === signal.city);
     if (!live) return signal;
-    const eta = live.forecastAqiInSixHours === null ? "Live now" : live.trend === "rising" ? "Rising +6h" : live.trend === "improving" ? "Improving +6h" : "Stable +6h";
+    const horizonAqi = live.forecastAqi[activeHorizon] ?? live.aqi;
+    const risk: Signal["risk"] = horizonAqi >= 151 ? "High" : horizonAqi >= 101 ? "Elevated" : "Watch";
+    const eta = activeHorizon === "now" ? "Live now" : live.forecastAqi[activeHorizon] === null ? "Forecast pending" : live.trend === "rising" ? `Rising +${activeHorizon}` : live.trend === "improving" ? `Improving +${activeHorizon}` : `Stable +${activeHorizon}`;
     return {
       ...signal,
-      aqi: Math.round(live.aqi),
-      risk: live.risk as Signal["risk"],
+      aqi: Math.round(horizonAqi),
+      risk,
       eta,
       confidence: liveClimateQuery.data?.status === "live" ? 86 : 68,
-      source: `Live public forecast · PM2.5 ${live.pm25.toFixed(1)} µg/m³ · wind ${live.windSpeed.toFixed(1)} km/h`,
-      summary: `${live.pm25.toFixed(1)} µg/m³ PM2.5 with ${live.windSpeed.toFixed(1)} km/h winds at ${live.windDirection.toFixed(0)}°. Six-hour air-quality trend: ${live.trend}.`,
+      source: `Live public forecast · ${activeWindow} AQI ${Math.round(horizonAqi)} · PM2.5 ${live.pm25.toFixed(1)} µg/m³`,
+      summary: `${activeWindow} AQI is ${Math.round(horizonAqi)}. Current PM2.5 is ${live.pm25.toFixed(1)} µg/m³ with ${live.windSpeed.toFixed(1)} km/h winds at ${live.windDirection.toFixed(0)}°.`,
     };
-  }), [liveClimateQuery.data]);
+  }), [activeHorizon, activeWindow, liveClimateQuery.data]);
 
   const visibleSignals = useMemo(
     () => dashboardSignals.filter(signal => activeCountry === "All" || signal.country === activeCountry),
     [activeCountry, dashboardSignals],
   );
   const activeSignal = dashboardSignals.find(signal => signal.id === activeSignalId) ?? dashboardSignals[0];
+  const activeLiveSignal = liveClimateQuery.data?.signals.find(signal => signal.city === activeSignal.city);
   const feedStatus = liveClimateQuery.data?.status ?? (liveClimateQuery.isLoading ? "loading" : "unavailable");
   const liveSignalCount = liveClimateQuery.data?.signals.length ?? 0;
 
   const selectSignal = (signal: Signal) => {
     setActiveSignalId(signal.id);
-    toast(`${signal.city} signal selected`, {
-      description: `${signal.risk} risk · ${signal.confidence}% model confidence`,
-    });
+    setIsSignalDossierOpen(true);
+    toast(`${signal.city} dossier opened`, { description: `${signal.risk} risk · ${activeWindow} horizon · ${signal.confidence}% source confidence` });
   };
 
   const scrollToField = () => document.getElementById("signal-field")?.scrollIntoView({ behavior: "smooth" });
+
+  const applyCountryFilter = (country: Country) => {
+    setActiveCountry(country);
+    const nextSignal = dashboardSignals.find(signal => country === "All" || signal.country === country);
+    if (nextSignal) {
+      setActiveSignalId(nextSignal.id);
+      setIsSignalDossierOpen(true);
+    }
+  };
+
+  const refreshLiveSignals = async () => {
+    try {
+      const snapshot = await climateRefreshMutation.mutateAsync();
+      await liveClimateQuery.refetch();
+      toast("Live field refreshed", { description: `${snapshot.signals.length} city snapshots received at ${new Date(snapshot.updatedAt).toLocaleTimeString()}.` });
+    } catch (error) {
+      toast("Live refresh unavailable", { description: error instanceof Error ? error.message : "The public source could not be reached. The prior snapshot remains visible." });
+    }
+  };
 
   const submitEvidence = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -354,10 +379,11 @@ export default function Home() {
                 <div className="flex items-center gap-2 text-[#A8E0CF]"><Activity className="h-4 w-4" /><span className="eyebrow">Signal field</span></div>
                 <h2 className="mt-2 font-serif text-3xl tracking-[-.05em] text-[#F4F7F1] md:text-4xl">The next 24 hours, mapped as one air system.</h2>
               </div>
-              <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1">
+              <div className="flex max-w-full flex-wrap gap-1.5 pb-1">
                 {forecastWindows.map(window => (
                   <button key={window} onClick={() => setActiveWindow(window)} className={`forecast-pill ${activeWindow === window ? "forecast-pill-active" : ""}`}>{window}</button>
                 ))}
+                <button onClick={() => void refreshLiveSignals()} disabled={climateRefreshMutation.isPending} className="forecast-pill inline-flex items-center gap-1.5 disabled:opacity-60"><RefreshCw className={`h-3.5 w-3.5 ${climateRefreshMutation.isPending ? "animate-spin" : ""}`} />Refresh</button>
               </div>
             </div>
 
@@ -419,13 +445,14 @@ export default function Home() {
                     {[['AQI', String(activeSignal.aqi)], ['Confidence', `${activeSignal.confidence}%`], ['Arrival', activeSignal.eta]].map(([label, value]) => <div key={label} className="px-2 first:pl-0 last:pr-0"><p className="text-[9px] uppercase tracking-[.14em] text-[#83A19D]">{label}</p><p className="mt-1 text-sm font-semibold text-[#F1F6F1]">{value}</p></div>)}
                   </div>
                   <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-[#A9C0BA]"><Radio className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#A8E0CF]" />{activeSignal.source}</div>
-                  <button onClick={() => isReviewer ? document.getElementById("review-desk")?.scrollIntoView({ behavior: "smooth" }) : toast("Human review required", { description: "A verifier or authorised desk must corroborate evidence before an alert briefing can be prepared." })} className="panel-action mt-5">{isReviewer ? "Open review workflow" : "Review before briefing"} <ArrowRight className="h-4 w-4" /></button>
+                  <button onClick={() => setIsSignalDossierOpen(true)} className="country-filter mt-5 w-full border-[#CDE1DA]/25 py-2.5 text-[#C7E6DC]">Open city dossier <ArrowRight className="ml-1 inline h-3.5 w-3.5" /></button>
+                  <button onClick={() => isReviewer ? document.getElementById("review-desk")?.scrollIntoView({ behavior: "smooth" }) : toast("Human review required", { description: "A verifier or authorised desk must corroborate evidence before an alert briefing can be prepared." })} className="panel-action mt-2">{isReviewer ? "Open review workflow" : "Review before briefing"} <ArrowRight className="h-4 w-4" /></button>
                 </div>
 
                 <div className="rounded-[26px] border border-[#DCEAE2]/12 bg-[#0A2937] p-5">
                   <div className="flex items-center justify-between"><span className="eyebrow">Filter by country</span><Globe2 className="h-4 w-4 text-[#90AAA4]" /></div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {countries.map(country => <button key={country} onClick={() => setActiveCountry(country)} className={`country-filter ${activeCountry === country ? "country-filter-active" : ""}`}>{country}</button>)}
+                    {countries.map(country => <button key={country} onClick={() => applyCountryFilter(country)} className={`country-filter ${activeCountry === country ? "country-filter-active" : ""}`}>{country}</button>)}
                   </div>
                 </div>
               </aside>
@@ -468,6 +495,8 @@ export default function Home() {
         </main>
 
         {isMobileMenuOpen && <div className="fixed inset-0 z-50 bg-[#04151F]/85 p-5 backdrop-blur-sm lg:hidden"><div className="h-full rounded-[28px] border border-[#DCEAE2]/12 bg-[#0A2937] p-6"><div className="flex items-center justify-between"><Logo /><button className="icon-button" onClick={() => setIsMobileMenuOpen(false)} aria-label="Close menu"><X className="h-5 w-5" /></button></div><div className="mt-10 space-y-3">{['Signal field', 'Active alerts', 'Partner desk', 'Evidence log'].map((label, index) => <button key={label} onClick={() => {setIsMobileMenuOpen(false); if (index === 0) scrollToField(); else toast("Briefing module", { description: "This hackathon prototype focuses on the live signal field." });}} className={`sidebar-link w-full ${index === 0 ? "sidebar-link-active" : ""}`}><span>{label}</span><ArrowRight className="ml-auto h-4 w-4" /></button>)}</div></div></div>}
+
+        {isSignalDossierOpen && <div className="fixed inset-0 z-[58] flex items-end justify-end bg-[#04151F]/70 p-0 backdrop-blur-sm sm:p-5"><section role="dialog" aria-modal="true" aria-label={`${activeSignal.city} live city dossier`} className="report-drawer w-full overflow-y-auto rounded-t-[28px] border border-[#DCEAE2]/14 bg-[#F1F5EE] p-6 text-[#0B2535] shadow-2xl sm:max-h-[90vh] sm:max-w-xl sm:rounded-[28px] md:p-8"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#53726D]">Live city dossier · {activeWindow}</p><h2 className="mt-2 font-serif text-4xl leading-none tracking-[-.06em]">{activeSignal.city}</h2><p className="mt-2 text-sm text-[#55706A]">{activeSignal.country} · source checked {liveClimateQuery.data?.updatedAt ? new Date(liveClimateQuery.data.updatedAt).toLocaleTimeString() : "pending"}</p></div><button onClick={() => setIsSignalDossierOpen(false)} className="light-icon-button" aria-label="Close city dossier"><X className="h-5 w-5" /></button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">{[["AQI", String(activeSignal.aqi)], ["PM2.5", activeLiveSignal?.pm25.toFixed(1) ?? "—"], ["PM10", activeLiveSignal?.pm10.toFixed(1) ?? "—"], ["NO₂", activeLiveSignal?.nitrogenDioxide.toFixed(1) ?? "—"], ["Wind", `${activeLiveSignal?.windSpeed.toFixed(1) ?? "—"} km/h`], ["Cloud cover", `${activeLiveSignal?.cloudCover.toFixed(0) ?? "—"}%`]].map(([label, value]) => <div key={label} className="rounded-2xl border border-[#B7CDC3] bg-white p-3"><p className="text-[9px] font-bold uppercase tracking-[.13em] text-[#59756E]">{label}</p><p className="mt-1 font-serif text-2xl tracking-[-.04em] text-[#153E3A]">{value}</p></div>)}</div><div className="mt-6 rounded-2xl bg-[#DCEAE1] p-4"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-[#47726A]">Operational readout</p><p className="mt-2 text-sm leading-6 text-[#315A55]">{activeSignal.summary} This view stays tied to the selected map pin and current forecast horizon.</p></div><div className="mt-6 flex flex-wrap gap-3"><button onClick={() => void refreshLiveSignals()} disabled={climateRefreshMutation.isPending} className="submit-button w-auto">{climateRefreshMutation.isPending ? "Refreshing…" : "Refresh live snapshot"} <RefreshCw className={`h-4 w-4 ${climateRefreshMutation.isPending ? "animate-spin" : ""}`} /></button><button onClick={() => { setIsSignalDossierOpen(false); setIsReportOpen(true); }} className="light-icon-button h-auto w-auto px-4 text-sm font-bold">Add local evidence</button></div><p className="mt-5 text-xs leading-5 text-[#5B756F]">Current public weather and air-quality data uses the built-in server adapter. Satellite detections and authority delivery remain approval-gated partner integrations.</p></section></div>}
 
         {isReportOpen && <div className="fixed inset-0 z-[60] flex items-end justify-end bg-[#04151F]/70 p-0 backdrop-blur-sm sm:p-5"><section role="dialog" aria-modal="true" aria-label="Submit a local signal" className="report-drawer w-full overflow-y-auto rounded-t-[28px] border border-[#DCEAE2]/14 bg-[#F1F5EE] p-6 text-[#0B2535] shadow-2xl sm:max-h-[90vh] sm:max-w-xl sm:rounded-[28px] md:p-8"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#53726D]">Secure citizen evidence</p><h2 className="mt-2 font-serif text-4xl leading-none tracking-[-.06em]">Add a local signal.</h2></div><button onClick={() => setIsReportOpen(false)} className="light-icon-button" aria-label="Close report form"><X className="h-5 w-5" /></button></div><p className="mt-4 max-w-md text-sm leading-6 text-[#536D69]">Reports are stored as submitted evidence, not public claims. A permitted verifier must corroborate a report before it can become an alert briefing.</p>{!isAuthenticated && <button onClick={startLogin} className="mt-4 rounded-lg bg-[#1B5E55] px-3 py-2 text-sm font-bold text-white">Sign in to submit securely</button>}<form onSubmit={submitEvidence} className="mt-7 space-y-4"><label className="field-label">Signal type<select name="incidentType" defaultValue="smoke_haze" className="field-input"><option value="smoke_haze">Smoke or haze</option><option value="industrial_emissions">Industrial emissions</option><option value="agricultural_burning">Agricultural burning</option><option value="sensor_reading">Low-cost sensor reading</option></select></label><div className="grid gap-4 sm:grid-cols-2"><label className="field-label">City / locality<input name="city" required minLength={2} placeholder="e.g. New Delhi" className="field-input" /></label><label className="field-label">Country<select name="countryCode" defaultValue="IN" className="field-input"><option value="BR">Brazil</option><option value="RU">Russia</option><option value="IN">India</option><option value="CN">China</option><option value="ZA">South Africa</option></select></label></div><label className="field-label">Observed time<input name="observedAt" type="datetime-local" className="field-input" /></label><label className="field-label">What are you seeing?<textarea name="description" required minLength={10} maxLength={3000} rows={4} placeholder="Describe the colour, direction, odour, duration, or visible source." className="field-input resize-none" /></label><label className="upload-box"><Camera className="h-5 w-5 text-[#2F776B]" /><span><strong>Add a photo or sensor file</strong><small>JPEG, PNG, WebP, CSV, text, or JSON; maximum 5 MB.</small></span><input name="attachment" type="file" accept="image/jpeg,image/png,image/webp,text/csv,text/plain,application/json" className="sr-only" /></label><label className="flex items-start gap-2 text-xs leading-5 text-[#4B6963]"><input name="consent" required type="checkbox" className="mt-1" />I confirm I may share this evidence for verification and understand that it will not be treated as a public claim until reviewed.</label><button disabled={evidenceMutation.isPending} type="submit" className="submit-button disabled:cursor-not-allowed disabled:opacity-60">{evidenceMutation.isPending ? "Sending securely…" : isAuthenticated ? "Send for verification" : "Sign in to send"} <ArrowRight className="h-4 w-4" /></button></form></section></div>}
       </div>
