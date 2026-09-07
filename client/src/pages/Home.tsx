@@ -16,6 +16,7 @@ import {
   Camera,
   ChevronRight,
   CircleAlert,
+  CheckCircle2,
   CloudSun,
   Crosshair,
   FileCheck2,
@@ -27,6 +28,7 @@ import {
   Radio,
   RefreshCw,
   ShieldCheck,
+  Satellite,
   Sparkles,
   TimerReset,
   UsersRound,
@@ -148,6 +150,13 @@ const navigationItems: [LucideIcon, string, boolean][] = [
   [FileCheck2, "Evidence log", false],
 ];
 
+const demoSteps: { id: string; label: string; kicker: string; title: string; body: string; icon: LucideIcon }[] = [
+  { id: "01", label: "Observe", kicker: "Local evidence", title: "A citizen signal starts the chain.", body: "A photo, sensor reading, or field note becomes a structured, consented evidence record — not a public claim.", icon: Camera },
+  { id: "02", label: "Detect", kicker: "Live intelligence", title: "The hidden hotspot gets a second lens.", body: "Weather, monitoring feeds, active-fire context, and Sentinel-5P imagery turn a local report into a spatial signal.", icon: Satellite },
+  { id: "03", label: "Forecast", kicker: "Corridor model", title: "Movement matters more than the city line.", body: "Forecast horizons show where the signal is heading, how certain the model is, and which economic corridor is exposed.", icon: Wind },
+  { id: "04", label: "Coordinate", kicker: "Human action", title: "The right desk gets a brief they can use.", body: "A reviewer corroborates the evidence, a permitted desk approves the alert, and partners receive a concise action path.", icon: CheckCircle2 },
+];
+
 function Logo() {
   return (
     <div className="flex items-center gap-3">
@@ -187,6 +196,7 @@ export default function Home() {
   const [activeCountry, setActiveCountry] = useState<Country>("All");
   const [activeWindow, setActiveWindow] = useState("Now");
   const [activeSignalId, setActiveSignalId] = useState(1);
+  const [activeDemoStep, setActiveDemoStep] = useState(0);
   const [isSignalDossierOpen, setIsSignalDossierOpen] = useState(false);
   const [satelliteLayer, setSatelliteLayer] = useState<"no2" | "aerosol">("no2");
   const [isReportOpen, setIsReportOpen] = useState(false);
@@ -222,6 +232,7 @@ export default function Home() {
   );
   const activeSignal = dashboardSignals.find(signal => signal.id === activeSignalId) ?? dashboardSignals[0];
   const activeLiveSignal = liveClimateQuery.data?.signals.find(signal => signal.city === activeSignal.city);
+  const activeDemo = demoSteps[activeDemoStep] ?? demoSteps[0];
   const satelliteLayerQuery = trpc.satellite.getLayer.useQuery(
     { city: activeSignal.city as "New Delhi" | "Beijing" | "São Paulo" | "Johannesburg" | "Moscow", layer: satelliteLayer },
     { enabled: isSignalDossierOpen, staleTime: 15 * 60 * 1000, retry: 1, refetchOnWindowFocus: false },
@@ -236,6 +247,20 @@ export default function Home() {
   };
 
   const scrollToField = () => document.getElementById("signal-field")?.scrollIntoView({ behavior: "smooth" });
+
+  const handleDemoStep = (stepIndex: number) => {
+    setActiveDemoStep(stepIndex);
+    if (stepIndex === 0) setIsReportOpen(true);
+    if (stepIndex === 1) scrollToField();
+    if (stepIndex === 2) {
+      setActiveWindow("+6h");
+      scrollToField();
+    }
+    if (stepIndex === 3) {
+      if (isReviewer) document.getElementById("review-desk")?.scrollIntoView({ behavior: "smooth" });
+      else toast("Human review is the final gate", { description: "Sign in with a permitted reviewer role to open the operational review desk." });
+    }
+  };
 
   const applyCountryFilter = (country: Country) => {
     setActiveCountry(country);
@@ -368,12 +393,33 @@ export default function Home() {
                 </button>
               </div>
               <div className="mt-10 grid max-w-xl grid-cols-3 gap-5 border-t border-[#E9F0E9]/15 pt-5">
-                {[[String(liveSignalCount || 5), 'cities in view'], [feedStatus === "live" ? 'Live' : 'Safe', 'feed state'], ['5m', 'server refresh']].map(([value, label]) => (
+                {[[String(liveSignalCount || 5), 'cities in view'], [feedStatus === "live" ? 'Live' : feedStatus === "loading" ? 'Loading' : feedStatus === "degraded" ? 'Partial' : 'Standby', 'feed state'], ['5m', 'server refresh']].map(([value, label]) => (
                   <div key={label}>
                     <p className="font-serif text-2xl tracking-[-.04em] text-[#F7F8F3]">{value}</p>
                     <p className="mt-1 text-[10px] uppercase tracking-[0.13em] text-[#AABFBA]">{label}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="px-5 py-8 md:px-8 lg:px-10">
+            <div className="rounded-[30px] border border-[#DCEAE2]/15 bg-[#E9EFE7] p-5 text-[#183E3A] shadow-[0_22px_60px_rgba(0,0,0,.14)] md:p-7">
+              <div className="grid gap-7 lg:grid-cols-[.7fr_1.3fr] lg:items-end">
+                <div>
+                  <div className="flex items-center gap-2 text-[#2F776B]"><RiverMark /><span className="text-[10px] font-extrabold uppercase tracking-[.18em]">The 90-second proof</span></div>
+                  <h2 className="mt-3 max-w-md font-serif text-4xl leading-[.94] tracking-[-.06em] md:text-5xl">One event. Four evidence handoffs.</h2>
+                  <p className="mt-4 max-w-md text-sm leading-6 text-[#4F6E67]">This is the shortest path through the product: begin with a local observation, verify it against live layers, forecast the corridor, and finish with a human-approved action.</p>
+                </div>
+                <div>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {demoSteps.map((step, index) => {
+                      const StepIcon = step.icon;
+                      return <button key={step.id} onClick={() => handleDemoStep(index)} className={`group rounded-2xl border p-3 text-left transition duration-200 ${activeDemoStep === index ? "border-[#2F776B] bg-[#F7F8F1] shadow-[0_10px_24px_rgba(47,119,107,.12)]" : "border-[#B7CDC3] bg-[#E0E9E0]/70 hover:-translate-y-0.5 hover:bg-[#F2F5EF]"}`}><div className="flex items-center justify-between"><StepIcon className={`h-4 w-4 ${activeDemoStep === index ? "text-[#2F776B]" : "text-[#76938B]"}`} /><span className="font-serif text-lg text-[#6A8880]">{step.id}</span></div><p className="mt-5 text-[10px] font-extrabold uppercase tracking-[.13em] text-[#487168]">{step.label}</p><p className="mt-1 text-xs font-semibold leading-4 text-[#183E3A]">{step.kicker}</p></button>;
+                    })}
+                  </div>
+                  <div className="mt-3 rounded-2xl border border-[#B7CDC3] bg-[#F7F8F1] p-4"><div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-[#2F776B]" /><span className="text-[10px] font-extrabold uppercase tracking-[.13em] text-[#487168]">{activeDemo.kicker}</span></div><p className="mt-2 font-serif text-2xl leading-none tracking-[-.04em] text-[#183E3A]">{activeDemo.title}</p><p className="mt-2 max-w-2xl text-sm leading-6 text-[#4F6E67]">{activeDemo.body}</p><button onClick={() => handleDemoStep(activeDemoStep)} className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#2F776B] transition hover:gap-2">Open this step <ArrowRight className="h-3.5 w-3.5" /></button></div>
+                </div>
               </div>
             </div>
           </section>
