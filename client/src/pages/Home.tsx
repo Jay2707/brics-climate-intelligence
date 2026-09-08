@@ -9,6 +9,7 @@ import { startLogin } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { ReviewDesk } from "@/components/ReviewDesk";
+import { WorldSignalMap } from "@/components/WorldSignalMap";
 import {
   Activity,
   ArrowRight,
@@ -53,6 +54,8 @@ type Signal = {
   aqi: number;
   position: { left: string; top: string };
   color: string;
+  lat: number;
+  lng: number;
 };
 
 const countries: Country[] = ["All", "Brazil", "Russia", "India", "China", "South Africa"];
@@ -72,6 +75,8 @@ const signals: Signal[] = [
     aqi: 184,
     position: { left: "53%", top: "54%" },
     color: "#F2B84B",
+    lat: 28.6139,
+    lng: 77.2090,
   },
   {
     id: 2,
@@ -86,6 +91,8 @@ const signals: Signal[] = [
     aqi: 126,
     position: { left: "73%", top: "37%" },
     color: "#DE7C51",
+    lat: 39.9042,
+    lng: 116.4074,
   },
   {
     id: 3,
@@ -100,6 +107,8 @@ const signals: Signal[] = [
     aqi: 74,
     position: { left: "25%", top: "73%" },
     color: "#78C7B2",
+    lat: -23.5505,
+    lng: -46.6333,
   },
   {
     id: 4,
@@ -114,6 +123,8 @@ const signals: Signal[] = [
     aqi: 118,
     position: { left: "49%", top: "81%" },
     color: "#DE7C51",
+    lat: -26.2041,
+    lng: 28.0473,
   },
   {
     id: 5,
@@ -128,6 +139,8 @@ const signals: Signal[] = [
     aqi: 61,
     position: { left: "46%", top: "21%" },
     color: "#78C7B2",
+    lat: 55.7558,
+    lng: 37.6173,
   },
 ];
 
@@ -439,52 +452,7 @@ export default function Home() {
             </div>
 
             <div className="signal-layout">
-              <div className="map-card relative overflow-hidden rounded-[30px] border border-[#DCEAE2]/12 bg-[#0A2635] shadow-[0_25px_60px_rgba(0,0,0,.24)]">
-                <img src="/manus-storage/brics-contour-field_611814d0.png" alt="" className="absolute inset-0 h-full w-full object-cover opacity-65" />
-                <div className="map-grain absolute inset-0" />
-                <div className="absolute left-5 top-5 z-20 flex flex-wrap gap-2">
-                  <span className="map-chip"><span className="h-1.5 w-1.5 rounded-full bg-[#F2B84B]" /> PM2.5 plume</span>
-                  <span className="map-chip"><span className="h-1.5 w-1.5 rounded-full bg-[#78C7B2]" /> Verified local report</span>
-                  <span className="map-chip"><CloudSun className="h-3.5 w-3.5" /> {activeWindow} forecast · {feedStatus}</span>
-                </div>
-                <article className="evidence-slip absolute left-5 top-[84px] z-20 max-w-[235px]" aria-label="Corroborated citizen evidence note">
-                  <div className="flex items-center gap-2"><RiverMark /><span className="text-[9px] font-extrabold uppercase tracking-[.17em]">Field note B-014</span><span className="ml-auto rounded-full bg-[#2F776B]/12 px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.1em] text-[#216257]">Corroborated</span></div>
-                  <p className="mt-2 font-serif text-[15px] leading-[1.08] tracking-[-.025em]">“Visible haze and ash fall reported west of the Delhi–NCR corridor.”</p>
-                  <p className="mt-2 text-[10px] leading-4 text-[#5E7772]">07:42 IST · privacy-preserved photo · paired with 3 nearby sensor readings</p>
-                </article>
-
-                <svg viewBox="0 0 1000 650" aria-hidden="true" className="absolute inset-0 h-full w-full overflow-visible">
-                  <defs>
-                    <filter id="softGlow"><feGaussianBlur stdDeviation="8" /></filter>
-                    <linearGradient id="plumeGradient" x1="0" x2="1"><stop offset="0%" stopColor="#F2B84B" stopOpacity="0" /><stop offset="34%" stopColor="#F2B84B" stopOpacity=".58" /><stop offset="72%" stopColor="#DE7C51" stopOpacity=".36" /><stop offset="100%" stopColor="#DE7C51" stopOpacity="0" /></linearGradient>
-                  </defs>
-                  <path d="M102 440 C262 320 344 495 492 392 S708 186 918 238" stroke="#F2B84B" strokeWidth="48" strokeLinecap="round" opacity=".10" filter="url(#softGlow)" />
-                  <path d="M102 440 C262 320 344 495 492 392 S708 186 918 238" stroke="url(#plumeGradient)" strokeWidth="11" strokeLinecap="round" className="plume-path" />
-                  <path d="M94 448 C240 350 334 522 486 412 S690 210 910 250" fill="none" stroke="#EBD383" strokeOpacity=".58" strokeWidth="1.3" strokeDasharray="7 10" />
-                  <path d="M172 144 C341 78 445 202 579 139 S806 133 941 77" fill="none" stroke="#94D1C0" strokeOpacity=".32" strokeWidth="2" strokeDasharray="3 9" />
-                  <path d="M180 556 C338 482 476 594 607 504 S765 405 930 460" fill="none" stroke="#B3D5CA" strokeOpacity=".18" strokeWidth="1" />
-                </svg>
-
-                <div className="absolute inset-0 z-10">
-                  {visibleSignals.map(signal => (
-                    <button
-                      key={signal.id}
-                      onClick={() => selectSignal(signal)}
-                      title={`${signal.city}: ${signal.risk} pollution signal`}
-                      className={`signal-pin ${signal.id === activeSignalId ? "signal-pin-active" : ""}`}
-                      style={{ left: signal.position.left, top: signal.position.top, "--pin-color": signal.color } as React.CSSProperties}
-                    >
-                      <span className="signal-pin-core"><span /></span>
-                      <span className="signal-pin-label">{signal.city}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="absolute bottom-5 left-5 z-20 rounded-xl border border-[#DDEAE1]/12 bg-[#08212E]/85 px-3 py-2.5 backdrop-blur-md">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#96B3AD]">Data blend</p>
-                  <p className="mt-1 text-xs text-[#D8E7E0]">Satellite · weather · citizen evidence</p>
-                </div>
-                <div className="absolute bottom-5 right-5 z-20 flex items-center gap-2 rounded-xl border border-[#DDEAE1]/12 bg-[#08212E]/85 px-3 py-2.5 backdrop-blur-md"><Crosshair className="h-4 w-4 text-[#A8E0CF]" /><span className="text-xs text-[#D8E7E0]">Regional alignment</span></div>
+              <div className="map-card relative overflow-hidden rounded-[30px] border border-[#DCEAE2]/12 bg-[#0A2635] shadow-[0_25px_60px_rgba(0,0,0,.24)]"><WorldSignalMap signals={visibleSignals} activeSignalId={activeSignalId} activeWindow={activeWindow} feedStatus={feedStatus} onSelect={(signal) => selectSignal(dashboardSignals.find(candidate => candidate.id === signal.id) ?? dashboardSignals[0])} />
               </div>
 
               <aside className="field-panel">
@@ -496,6 +464,7 @@ export default function Home() {
                     {[['AQI', String(activeSignal.aqi)], ['Confidence', `${activeSignal.confidence}%`], ['Arrival', activeSignal.eta]].map(([label, value]) => <div key={label} className="px-2 first:pl-0 last:pr-0"><p className="text-[9px] uppercase tracking-[.14em] text-[#83A19D]">{label}</p><p className="mt-1 text-sm font-semibold text-[#F1F6F1]">{value}</p></div>)}
                   </div>
                   <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-[#A9C0BA]"><Radio className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#A8E0CF]" />{activeSignal.source}</div>
+                  <div className="mt-3 rounded-xl border border-[#F0C55B]/15 bg-[#F0C55B]/5 px-3 py-2 text-[10px] leading-4 text-[#D9C985]">Repo-informed lineage: hotspot detection → corridor forecast → human-reviewed alert.</div>
                   <button onClick={() => setIsSignalDossierOpen(true)} className="country-filter mt-5 w-full border-[#CDE1DA]/25 py-2.5 text-[#C7E6DC]">Open city dossier <ArrowRight className="ml-1 inline h-3.5 w-3.5" /></button>
                   <button onClick={() => isReviewer ? document.getElementById("review-desk")?.scrollIntoView({ behavior: "smooth" }) : toast("Human review required", { description: "A verifier or authorised desk must corroborate evidence before an alert briefing can be prepared." })} className="panel-action mt-2">{isReviewer ? "Open review workflow" : "Review before briefing"} <ArrowRight className="h-4 w-4" /></button>
                 </div>

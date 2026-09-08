@@ -221,3 +221,10 @@
 - [x] Ready for final validation.
 - [x] Ready for final handoff.
 - [x] Complete.
+
+- [x] Inspect the attached AeroSentinel repository archive without executing untrusted code.
+- [x] Compare the archive's map, data, assets, and interaction patterns with the existing BRICS Climate Intelligence project.
+- [x] Implement a full-world interactive map that keeps BRICS corridor focus and live source provenance.
+- [x] Apply relevant verified AeroSentinel data and information to the BRICS experience without importing conflicting or unsafe code.
+- [x] Validate world-map interactions, responsive behavior, live states, tests, and production build.
+- [x] Document the map/data integration decisions and any required API keys or datasets.
