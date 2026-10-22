@@ -1,4 +1,4 @@
-import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { decimal, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 export const appRoles = ["user", "reporter", "verifier", "city_desk", "national_desk", "admin"] as const;
 export const reportStatuses = ["submitted", "under_review", "corroborated", "rejected", "escalated"] as const;
@@ -34,6 +34,12 @@ export const evidenceReports = mysqlTable("evidence_reports", {
   attachmentKey: text("attachmentKey"),
   attachmentUrl: text("attachmentUrl"),
   attachmentMimeType: varchar("attachmentMimeType", { length: 100 }),
+  latitude: decimal("latitude", { precision: 10, scale: 6 }),
+  longitude: decimal("longitude", { precision: 10, scale: 6 }),
+  municipality: varchar("municipality", { length: 160 }),
+  aiClassification: text("aiClassification"),
+  aiSeverity: mysqlEnum("aiSeverity", alertSeverities),
+  aiConfidence: int("aiConfidence"),
   verificationStatus: mysqlEnum("verificationStatus", reportStatuses).default("submitted").notNull(),
   reviewNote: text("reviewNote"),
   reviewedBy: int("reviewedBy").references(() => users.id),

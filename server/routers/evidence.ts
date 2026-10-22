@@ -18,7 +18,9 @@ import {
 import { validateEvidenceAttachment } from "../evidenceValidation";
 import { notifyOwner } from "../_core/notification";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { invokeLLM } from "../_core/llm";
 import { storagePut } from "../storage";
+import { fallbackEvidenceTriage, normalizeEvidenceTriage } from "../evidenceTriage";
 
 const roleProcedure = (permission: OperationalPermission) => protectedProcedure.use(({ ctx, next }) => {
   if (!hasOperationalPermission(ctx.user.role as AppRole, permission)) {
@@ -44,6 +46,9 @@ export const evidenceRouter = router({
     description: z.string().trim().min(10).max(3_000),
     observedAt: z.number().int().positive(),
     consentProvided: z.literal(true),
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    municipality: z.string().trim().max(160).optional(),
     attachment: attachmentSchema,
   })).mutation(async ({ ctx, input }) => {
     let attachmentKey: string | undefined;
@@ -57,6 +62,45 @@ export const evidenceRouter = router({
       attachmentUrl = stored.url;
       attachmentMimeType = input.attachment.mimeType;
     }
+    let aiClassification = fallbackEvidenceTriage.classification;
+    let aiSeverity: (typeof alertSeverities)[number] = fallbackEvidenceTriage.severity;
+    let aiConfidence = fallbackEvidenceTriage.confidence;
+    try {
+      const triageContent = [
+        { type: "text" as const, text: `Incident type: ${input.incidentType}\nDescription: ${input.description}\nAttachment MIME: ${input.attachment?.mimeType ?? "none"}\nClassify the likely pollution signal and recommend a review priority.` },
+        ...(input.attachment?.mimeType.startsWith("image/") ? [{ type: "image_url" as const, image_url: { url: `data:${input.attachment.mimeType};base64,${input.attachment.dataBase64}`, detail: "low" as const } }] : []),
+      ];
+      const triage = await invokeLLM({
+        messages: [
+          { role: "system", content: "You are a cautious civic air-quality triage assistant. Classify a citizen observation for a municipal reviewer. Never claim certainty, never diagnose health effects, and return only the requested JSON." },
+          { role: "user", content: triageContent },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "citizen_signal_triage",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                classification: { type: "string" },
+                severity: { type: "string", enum: alertSeverities },
+                confidence: { type: "integer", minimum: 0, maximum: 100 },
+              },
+              required: ["classification", "severity", "confidence"],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+      const content = triage.choices[0]?.message.content;
+      const normalized = normalizeEvidenceTriage(typeof content === "string" ? content : undefined);
+      aiClassification = normalized.classification;
+      aiSeverity = normalized.severity;
+      aiConfidence = normalized.confidence;
+    } catch (error) {
+      console.warn("[Evidence] AI triage unavailable; storing human-review fallback", error);
+    }
     return createEvidenceReport({
       reporterId: ctx.user.id,
       city: input.city,
@@ -68,6 +112,12 @@ export const evidenceRouter = router({
       attachmentKey,
       attachmentUrl,
       attachmentMimeType,
+      latitude: input.latitude?.toFixed(6),
+      longitude: input.longitude?.toFixed(6),
+      municipality: input.municipality,
+      aiClassification,
+      aiSeverity,
+      aiConfidence,
       verificationStatus: "submitted",
     });
   }),

@@ -47,7 +47,8 @@ export function ReviewDesk({ role }: ReviewDeskProps) {
 
   const prepareAlert = async (reportId: number, city: string) => {
     try {
-      await createAlert.mutateAsync({ evidenceReportId: reportId, severity: "elevated", recipientDesks: [`${city} city desk`, "National coordination desk"] });
+      const report = evidenceQuery.data?.find(item => item.id === reportId);
+      await createAlert.mutateAsync({ evidenceReportId: reportId, severity: report?.aiSeverity ?? "elevated", recipientDesks: [report?.municipality ? `${report.municipality} municipal desk` : `${city} city desk`, "National coordination desk"] });
       toast("Alert briefing drafted", { description: "The briefing is awaiting final authorised dispatch." });
     } catch (error) {
       toast("Alert draft could not be created", { description: error instanceof Error ? error.message : "Please try again." });
@@ -84,6 +85,7 @@ export function ReviewDesk({ role }: ReviewDeskProps) {
               <article key={report.id} className="rounded-2xl border border-[#DCEAE2]/10 bg-[#0C2E3C] p-4">
                 <div className="flex items-start justify-between gap-3"><div><p className="font-serif text-xl tracking-[-.04em] text-[#F3F7F1]">{report.city}</p><p className="mt-1 text-xs text-[#9FB9B2]">{readable(report.incidentType)} · {new Date(report.observedAt).toLocaleString()}</p></div><span className="risk-badge border-[#A8E0CF]/30 bg-[#A8E0CF]/10 text-[#BCEADB]">{readable(report.verificationStatus)}</span></div>
                 <p className="mt-3 text-sm leading-5 text-[#B6CBC5]">{report.description}</p>
+                <div className="mt-3 grid gap-2 rounded-xl border border-[#A8E0CF]/12 bg-[#082633] p-3 text-xs text-[#AFC8C0] sm:grid-cols-2"><p><span className="font-bold text-[#F2D47A]">AI triage:</span> {report.aiClassification ?? "Pending"} {report.aiConfidence ? `(${report.aiConfidence}% confidence)` : ""}</p><p><span className="font-bold text-[#F2D47A]">Route:</span> {report.municipality ?? `${report.city} city desk`} · {report.latitude && report.longitude ? `${Number(report.latitude).toFixed(4)}, ${Number(report.longitude).toFixed(4)}` : "coordinates not shared"}</p></div>
                 <div className="mt-4 flex flex-wrap gap-2">{report.verificationStatus !== "corroborated" && <button disabled={reviewEvidence.isPending} onClick={() => void corroborate(report.id)} className="country-filter country-filter-active">Corroborate</button>}{report.verificationStatus === "corroborated" && <button disabled={createAlert.isPending} onClick={() => void prepareAlert(report.id, report.city)} className="country-filter country-filter-active">Prepare alert</button>}{report.attachmentUrl && <a href={report.attachmentUrl} target="_blank" rel="noreferrer" className="country-filter">Open evidence</a>}</div>
               </article>
             )) : <p className="text-sm text-[#AFC4BE]">No reports require review.</p>}
